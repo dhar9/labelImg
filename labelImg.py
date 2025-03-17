@@ -1,21 +1,52 @@
 #!/usr/bin/env python
 # -*- coding: utf-8 -*-
+
+"""
+LabelImg: A graphical image annotation tool for labeling images with bounding boxes.
+
+This script initializes the main components of the application, including 
+the graphical user interface (GUI) and essential libraries. The tool supports 
+multiple file formats for annotations, such as Pascal VOC, YOLO, and Create ML.
+
+Modules and Libraries:
+- argparse, codecs, os, platform, shutil, sys: Standard Python modules for argument parsing, 
+  file manipulation, and system interactions.
+- PyQt4/PyQt5: GUI framework for creating the application's user interface.
+- Custom libraries: Various helper modules such as `libs.canvas`, `libs.settings`, 
+  and `libs.shape` are imported to support drawing, user settings, and shape management.
+
+Classes:
+- `WindowMixin`: A mixin class to provide utility methods for managing menus and toolbars.
+
+Key Features:
+- Comboboxes and dialogs for user interaction.
+- Support for reading/writing annotation formats like Pascal VOC, YOLO, and Create ML.
+- Canvas for drawing and annotating bounding boxes.
+- Zoom and light widgets for enhancing user experience during annotation.
+
+Custom Libraries:
+- `libs.resources`: Contains resources (e.g., icons and images) used in the application.
+- `libs.shape`: Manages shapes drawn on the canvas, including their default colors.
+- `libs.labelFile`: Handles annotation file input/output operations.
+- `libs.zoomWidget`: Provides zooming capabilities for the canvas.
+- `libs.lightWidget`: A widget for managing brightness or lighting adjustments.
+
+Variables:
+- `__appname__`: The name of the application ("labelImg")."""
 import argparse
 import codecs
 import os.path
 import platform
 import shutil
 import sys
+import system
 import webbrowser as wb
 from functools import partial
-
 try:
     from PyQt5.QtGui import *
     from PyQt5.QtCore import *
     from PyQt5.QtWidgets import *
 except ImportError:
-    # needed for py3+qt4
-    # Ref:
     # http://pyqt.sourceforge.net/Docs/PyQt4/incompatible_apis.html
     # http://stackoverflow.com/questions/21217399/pyqt4-qtcore-qvariant-object-instead-of-a-string
     if sys.version_info.major >= 3:
@@ -23,7 +54,6 @@ except ImportError:
         sip.setapi('QVariant', 2)
     from PyQt4.QtGui import *
     from PyQt4.QtCore import *
-
 from libs.combobox import ComboBox
 from libs.default_label_combobox import DefaultLabelComboBox
 from libs.resources import *
@@ -47,10 +77,7 @@ from libs.create_ml_io import CreateMLReader
 from libs.create_ml_io import JSON_EXT
 from libs.ustr import ustr
 from libs.hashableQListWidgetItem import HashableQListWidgetItem
-
 __appname__ = 'labelImg'
-
-
 class WindowMixin(object):
 
     def menu(self, title, actions=None):
@@ -68,30 +95,23 @@ class WindowMixin(object):
             add_actions(toolbar, actions)
         self.addToolBar(Qt.LeftToolBarArea, toolbar)
         return toolbar
-
-
 class MainWindow(QMainWindow, WindowMixin):
     FIT_WINDOW, FIT_WIDTH, MANUAL_ZOOM = list(range(3))
 
     def __init__(self, default_filename=None, default_prefdef_class_file=None, default_save_dir=None):
         super(MainWindow, self).__init__()
         self.setWindowTitle(__appname__)
-
         # Load setting in the main thread
         self.settings = Settings()
         self.settings.load()
         settings = self.settings
-
         self.os_name = platform.system()
-
         # Load string bundle for i18n
         self.string_bundle = StringBundle.get_bundle()
         get_str = lambda str_id: self.string_bundle.get_string(str_id)
-
         # Save as Pascal voc xml
         self.default_save_dir = default_save_dir
         self.label_file_format = settings.get(SETTING_LABEL_FILE_FORMAT, LabelFileFormat.PASCAL_VOC)
-
         # For loading all image under a directory
         self.m_img_list = []
         self.dir_name = None
@@ -99,59 +119,46 @@ class MainWindow(QMainWindow, WindowMixin):
         self.last_open_dir = None
         self.cur_img_idx = 0
         self.img_count = len(self.m_img_list)
-
         # Whether we need to save or not.
         self.dirty = False
-
         self._no_selection_slot = False
         self._beginner = True
         self.screencast = "https://youtu.be/p0nR2YsCY_U"
-
         # Load predefined classes to the list
         self.load_predefined_classes(default_prefdef_class_file)
-
         if self.label_hist:
             self.default_label = self.label_hist[0]
         else:
             print("Not find:/data/predefined_classes.txt (optional)")
-
         # Main widgets and related state.
         self.label_dialog = LabelDialog(parent=self, list_item=self.label_hist)
-
         self.items_to_shapes = {}
         self.shapes_to_items = {}
         self.prev_label_text = ''
-
         list_layout = QVBoxLayout()
         list_layout.setContentsMargins(0, 0, 0, 0)
-
         # Create a widget for using default label
         self.use_default_label_checkbox = QCheckBox(get_str('useDefaultLabel'))
         self.use_default_label_checkbox.setChecked(False)
         self.default_label_combo_box = DefaultLabelComboBox(self,items=self.label_hist)
-
         use_default_label_qhbox_layout = QHBoxLayout()
         use_default_label_qhbox_layout.addWidget(self.use_default_label_checkbox)
         use_default_label_qhbox_layout.addWidget(self.default_label_combo_box)
         use_default_label_container = QWidget()
         use_default_label_container.setLayout(use_default_label_qhbox_layout)
-
         # Create a widget for edit and diffc button
         self.diffc_button = QCheckBox(get_str('useDifficult'))
         self.diffc_button.setChecked(False)
         self.diffc_button.stateChanged.connect(self.button_state)
         self.edit_button = QToolButton()
         self.edit_button.setToolButtonStyle(Qt.ToolButtonTextBesideIcon)
-
         # Add some of widgets to list_layout
         list_layout.addWidget(self.edit_button)
         list_layout.addWidget(self.diffc_button)
         list_layout.addWidget(use_default_label_container)
-
         # Create and add combobox for showing unique labels in group
         self.combo_box = ComboBox(self)
         list_layout.addWidget(self.combo_box)
-
         # Create and add a widget for showing current label items
         self.label_list = QListWidget()
         label_list_container = QWidget()
@@ -162,9 +169,6 @@ class MainWindow(QMainWindow, WindowMixin):
         # Connect to itemChanged to detect checkbox changes.
         self.label_list.itemChanged.connect(self.label_item_changed)
         list_layout.addWidget(self.label_list)
-
-
-
         self.dock = QDockWidget(get_str('boxLabelText'), self)
         self.dock.setObjectName(get_str('labels'))
         self.dock.setWidget(label_list_container)
